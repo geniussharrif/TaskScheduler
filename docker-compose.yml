@@ -1,0 +1,78 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+
+  zookeeper:
+    image: wurstmeister/zookeeper:latest
+    ports:
+      - "2181:2181"
+
+  karafka:
+    build: task_scheduler/
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BROKER_URL: kafka:9092  # Ensure this matches your Karafka configuration
+    command: bundle exec karafka server
+    depends_on:
+      - kafka
+
+
+  kafka:
+    image: wurstmeister/kafka:latest
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_LISTENERS: PLAINTEXT://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+    depends_on:
+      - zookeeper
+
+  app:
+    build: task_scheduler/
+    command: ["bundle", "exec", "rails", "server", "-b", "0.0.0.0"]
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+      - redis
+      - kafka
+    volumes:
+      - .:/Users/dev/Documents/TaskScheduler/task_scheduler:/usr/src/app
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BROKER_URL: kafka:9092
+
+
+  sidekiq:
+    build: task_scheduler/
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+    depends_on:
+      - redis
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BROKER_URL: kafka:9092
+  client:
+    build: client/
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres_data:
